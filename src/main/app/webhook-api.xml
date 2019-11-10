@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw"
+	xmlns:amqp="http://www.mulesoft.org/schema/mule/amqp" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/amqp http://www.mulesoft.org/schema/mule/amqp/current/mule-amqp.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+    <http:listener-config name="HTTP_Listener_Configuration" host="0.0.0.0" port="${http.port}" doc:name="HTTP Listener Configuration"/>
+    <amqp:connector name="AMQP_0_9_Connector" validateConnections="true" host="${mq.host}" virtualHost="${mq.virtualhost}" username="${mq.username}" password="${mq.password}" doc:name="AMQP-0-9 Connector"/>
+    
+    <flow name="webhook-apiFlow">
+        <http:listener config-ref="HTTP_Listener_Configuration" path="/webhooks" allowedMethods="POST" doc:name="HTTP"/>
+        <flow-ref name="validate" doc:name="validate"/>
+        <choice doc:name="Choice">
+            <when expression="#[flowVars['validate'] == true]">
+             <logger message="Event processing for event # #[flowVars['eventId']]" level="INFO" doc:name="Logger"/>
+                <amqp:outbound-endpoint queueName="queue.blend.event.master" responseTimeout="10000" mimeType="application/json" connector-ref="AMQP_0_9_Connector" doc:name="AMQP-0-9"/>
+                <set-payload value="{  &quot;status&quot; : &quot;success&quot; }" mimeType="application/json" doc:name="Set Payload"/>
+            </when>
+            <otherwise>
+                 <set-payload value="{  &quot;status&quot; : &quot;fail&quot; ,  &quot;error&quot; : &quot;validation failure&quot; }" mimeType="application/json" doc:name="Set Payload"/>
+            </otherwise>
+        </choice>
+        <catch-exception-strategy doc:name="Catch Exception Strategy">
+             <logger message="Error processing # #[flowVars['eventId']] #[message.payload]" level="ERROR" doc:name="Logger"/>
+        </catch-exception-strategy>
+    </flow>
+    <flow name="validate">
+        <dw:transform-message doc:name="Transform Message">
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-payload>
+        </dw:transform-message>
+        <set-variable variableName="eventId" value="#[payload['eventId']]" doc:name="Variable eventId"/>
+        <json:object-to-json-transformer mimeType="application/json" doc:name="Object to JSON"/>
+        <set-variable variableName="validate" value="#[true]" doc:name="Variable validate"/>
+        <catch-exception-strategy doc:name="Catch Exception Strategy">
+            <logger level="ERROR" doc:name="Logger" message="Error validating event"/>
+             <set-variable variableName="validate" value="#[false]" doc:name="Variable validate"/>
+        </catch-exception-strategy>
+    </flow> 
+</mule>
